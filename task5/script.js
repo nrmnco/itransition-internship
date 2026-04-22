@@ -1,11 +1,10 @@
 // Configuration & Global Variables
+const DATA_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTeF9eoWU5n1juh0qdiwR-fuoS-JoXbanZhuN47HuVQ3opEVOw9t7ChWhzPWSkjENyAYgyRFjlOP85w/pub?gid=749794121&single=true&output=csv";
 let miningData = [];
 let mines = []; // List of detected mine names
 let chartInstance = null;
 
 const UI = {
-    loadBtn: document.getElementById('load-btn'),
-    csvUrl: document.getElementById('csv-url'),
     dashboard: document.getElementById('dashboard'),
     welcome: document.getElementById('welcome-screen'),
     mineSelect: document.getElementById('mine-select'),
@@ -27,7 +26,6 @@ const UI = {
 };
 
 // Event Listeners
-UI.loadBtn.addEventListener('click', loadData);
 UI.mineSelect.addEventListener('change', updateUI);
 UI.chartType.addEventListener('change', updateUI);
 UI.trendDegree.addEventListener('change', updateUI);
@@ -37,24 +35,15 @@ UI.maWindow.addEventListener('input', updateUI);
 UI.maThreshold.addEventListener('input', updateUI);
 UI.pdfBtn.addEventListener('click', generatePDF);
 
+// Initialize on load
+window.onload = loadData;
+
 async function loadData() {
-    const url = UI.csvUrl.value.trim();
-    if (!url) {
-        alert("Please enter a valid Google Sheets CSV URL.");
-        return;
-    }
-
-    UI.loadBtn.textContent = "COMMUNICATING...";
-    UI.loadBtn.disabled = true;
-
-    Papa.parse(url, {
+    Papa.parse(DATA_URL, {
         download: true,
         header: true,
         skipEmptyLines: true,
         complete: function(results) {
-            UI.loadBtn.textContent = "LOAD DATA SOURCE";
-            UI.loadBtn.disabled = false;
-            
             if (results.data && results.data.length > 0) {
                 // Pre-process data: Convert comma decimals to dots and strings to numbers
                 miningData = results.data.filter(row => row.Date).map(row => {
