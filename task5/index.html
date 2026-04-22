@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weyland-Yutani Mine Analytics</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <!-- Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse"></script>
+    <script src="https://cdn.jsdelivr.net/npm/simple-statistics@7.8.3/dist/simple-statistics.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/regression@2.0.1/dist/regression.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+</head>
+
+<body>
+    <div class="app-container">
+        <header>
+            <h1>Dashboard</h1>
+            <div class="input-group">
+                <input type="text" id="csv-url" placeholder="CSV URL...">
+                <button id="load-btn">Load</button>
+            </div>
+        </header>
+
+        <main id="dashboard" style="display: none;">
+            <div class="controls-panel">
+                <div class="control-row">
+                    <div class="control-box">
+                        <label>Active Mine</label>
+                        <select id="mine-select">
+                            <option value="total">All Mines (Total)</option>
+                        </select>
+                    </div>
+                    <div class="control-box">
+                        <label>Chart Type</label>
+                        <select id="chart-type">
+                            <option value="line">Line Wave</option>
+                            <option value="bar">Bar Chart</option>
+                            <option value="stacked-bar">Stacked Bar</option>
+                            <option value="stacked-area">Stacked Area</option>
+                        </select>
+                    </div>
+                    <div class="control-box">
+                        <label>Trendline</label>
+                        <select id="trend-degree">
+                            <option value="0">None</option>
+                            <option value="1">Linear</option>
+                            <option value="2">Quadratic</option>
+                            <option value="3">Cubic</option>
+                            <option value="4">Quartic</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="control-row secondary-controls">
+                    <div class="control-box">
+                        <label title="Z-Score Threshold">Z-Threshold</label>
+                        <input type="number" id="z-threshold" value="3" step="0.1" min="1">
+                    </div>
+                    <div class="control-box">
+                        <label title="IQR Factor (Standard is 1.5)">IQR Factor</label>
+                        <input type="number" id="iqr-factor" value="1.5" step="0.1" min="0.5">
+                    </div>
+                    <div class="control-box">
+                        <label title="Moving Average Window">MA Window</label>
+                        <input type="number" id="ma-window" value="7" step="1" min="2">
+                    </div>
+                    <div class="control-box">
+                        <label title="MA Deviation %">MA Dev %</label>
+                        <input type="number" id="ma-threshold" value="20" step="1" min="1">
+                    </div>
+                    <button id="pdf-btn" class="secondary-btn">GENERATE PDF REPORT</button>
+                </div>
+            </div>
+
+            <section class="stats-grid">
+                <div class="stat-card">
+                    <span class="label">Mean Daily Output</span>
+                    <span class="value" id="stat-mean">-</span>
+                </div>
+                <div class="stat-card">
+                    <span class="label">Standard Deviation</span>
+                    <span class="value" id="stat-std">-</span>
+                </div>
+                <div class="stat-card">
+                    <span class="label">Median Output</span>
+                    <span class="value" id="stat-median">-</span>
+                </div>
+                <div class="stat-card">
+                    <span class="label">Interquartile Range</span>
+                    <span class="value" id="stat-iqr">-</span>
+                </div>
+            </section>
+
+            <section class="visuals-area">
+                <div class="chart-container" id="chart-capture-area">
+                    <canvas id="main-chart"></canvas>
+                </div>
+            </section>
+
+            <section class="anomaly-report">
+                <div class="section-header">
+                    <h2>ANOMALY DETECTION LOG</h2>
+                    <span class="badge" id="anomaly-count">0 Detected</span>
+                </div>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Output</th>
+                                <th>Z-Score</th>
+                                <th>IQR Rule</th>
+                                <th>MA Dist %</th>
+                                <th>Grubbs' G</th>
+                            </tr>
+                        </thead>
+                        <tbody id="anomaly-log">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+
+        <div id="welcome-screen">
+            <div class="message">
+                <p>Awaiting primary data link from mining coordinates...</p>
+                <div class="pulse"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
