@@ -1,5 +1,5 @@
 // Configuration & Global Variables
-const DATA_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTeF9eoWU5n1juh0qdiwR-fuoS-JoXbanZhuN47HuVQ3opEVOw9t7ChWhzPWSkjENyAYgyRFjlOP85w/pub?gid=749794121&single=true&output=csv";
+const DATA_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTeF9eoWU5n1juh0qdiwR-fuoS-JoXbanZhuN47HuVQ3opEVOw9t7ChWhzPWSkjENyAYgyRFjlOP85w/pub?gid=612676832&single=true&output=csv";
 let miningData = [];
 let mines = []; // List of detected mine names
 let chartInstance = null;
@@ -43,11 +43,21 @@ async function loadData() {
         download: true,
         header: true,
         skipEmptyLines: true,
-        complete: function(results) {
+        complete: function (results) {
             if (results.data && results.data.length > 0) {
-                // Pre-process data: Convert comma decimals to dots and strings to numbers
+                // Pre-process data
                 miningData = results.data.filter(row => row.Date).map(row => {
                     const newRow = { ...row };
+
+                    // Handle Date format DD.MM.YYYY
+                    if (newRow.Date && newRow.Date.includes('.')) {
+                        const parts = newRow.Date.split('.');
+                        if (parts.length === 3) {
+                            // Convert to YYYY-MM-DD for standard JS parsing
+                            newRow.Date = `${parts[2]}-${parts[1]}-${parts[0]}`;
+                        }
+                    }
+
                     Object.keys(newRow).forEach(key => {
                         if (key !== 'Date' && typeof newRow[key] === 'string') {
                             // Replace comma with dot and parse as float
@@ -59,13 +69,15 @@ async function loadData() {
                     return newRow;
                 });
 
-                // Detect mine columns
+                // Detect mine columns (ignore Date, empty headers, and extra PapaParse columns)
                 const headers = results.meta.fields;
-                mines = headers.filter(h => h.toLowerCase().includes('mine') || h === 'FINAL OUTPUT' || h === 'Raw Value');
-                
-                if (mines.length === 0) {
-                    mines = headers.filter(h => !['date', 'total', 'trend'].includes(h.toLowerCase()));
-                }
+                mines = headers.filter(h => 
+                    h && 
+                    h.toLowerCase() !== 'date' && 
+                    h.trim() !== '' && 
+                    !h.startsWith('__') &&
+                    !/^\_\d+$/.test(h) // Ignore ghost columns like _1, _2
+                );
 
                 populateMineSelect();
                 showDashboard();
@@ -74,11 +86,9 @@ async function loadData() {
                 alert("Data received is empty or malformed.");
             }
         },
-        error: function(err) {
+        error: function (err) {
             console.error("PapaParse Error:", err);
-            alert("Failed to reach data source. Check Console (F12) for details. Usually this is a CORS block—ensure you are running a local server (python3 -m http.server).");
-            UI.loadBtn.textContent = "LOAD DATA SOURCE";
-            UI.loadBtn.disabled = false;
+            alert("Error loading data. Check console (F12).");
         }
     });
 }
@@ -103,25 +113,31 @@ function showDashboard() {
 
 function updateUI() {
     if (miningData.length === 0) return;
-    
+
     const activeMine = UI.mineSelect.value;
     const dates = miningData.map(d => d.Date);
-    
+
     let values;
     if (activeMine === 'total') {
-        // Try to find a Total column, or sum mines
+        // Sum all mine columns for each row
         values = miningData.map(d => {
-            if (d['TOTAL OUTPUT'] !== undefined) return d['TOTAL OUTPUT'];
-            if (d['Total'] !== undefined) return d['Total'];
-            return mines.reduce((sum, m) => sum + (d[m] || 0), 0);
+            return mines.reduce((sum, mine) => sum + (parseFloat(d[mine]) || 0), 0);
         });
     } else {
-        values = miningData.map(d => d[activeMine] || 0);
+        values = miningData.map(d => d[activeMine]);
+    }
+
+    // CRITICAL: Filter out any non-numbers (NaN, undefined, null) before processing
+    values = values.map(v => parseFloat(v)).filter(v => !isNaN(v) && v !== null);
+
+    if (values.length === 0) {
+        console.warn("No numeric data found for selection:", activeMine);
+        return;
     }
 
     const stats = calculateStats(values);
     const anomalies = detectAnomalies(values, dates);
-    
+
     updateStatsDisplay(stats);
     updateAnomalyLog(anomalies);
     renderChart(dates, values, anomalies, activeMine);
@@ -145,23 +161,23 @@ function detectAnomalies(values, dates) {
     const iqrF = parseFloat(UI.iqrFactor.value);
     const maW = parseInt(UI.maWindow.value);
     const maT = parseFloat(UI.maThreshold.value);
-    
+
     // Grubbs Critical Value Approximation (N > 10, alpha 0.05)
     const n = values.length;
     const gCrit = (n - 1) / Math.sqrt(n) * Math.sqrt(Math.pow(2.5, 2) / (n - 2 + Math.pow(2.5, 2))); // Simple approx
 
     return values.map((val, idx) => {
-        const zScore = Math.abs(val - stats.mean) / stats.std;
-        const isIQR = (val < stats.q1 - iqrF * stats.iqr) || (val > stats.q3 + iqrF * stats.iqr);
-        
+        const zScore = stats.std > 0 ? Math.abs(val - stats.mean) / stats.std : 0;
+        const isIQR = stats.iqr > 0 ? (val < stats.q1 - iqrF * stats.iqr) || (val > stats.q3 + iqrF * stats.iqr) : false;
+
         // Moving Average
-        const start = Math.max(0, idx - Math.floor(maW/2));
-        const end = Math.min(values.length, idx + Math.ceil(maW/2));
+        const start = Math.max(0, idx - Math.floor(maW / 2));
+        const end = Math.min(values.length, idx + Math.ceil(maW / 2));
         const ma = ss.mean(values.slice(start, end));
         const maDist = ((Math.abs(val - ma)) / ma) * 100;
-        
+
         const grubbsG = Math.abs(val - stats.mean) / stats.std;
-        
+
         const isAnomaly = zScore > zT || isIQR || maDist > maT || grubbsG > 3.0;
 
         return {
@@ -187,7 +203,7 @@ function updateAnomalyLog(anomalies) {
     UI.anomalyLog.innerHTML = "";
     const flagged = anomalies.filter(a => a.isAnomaly);
     UI.anomalyCount.textContent = `${flagged.length} Detected`;
-    
+
     flagged.forEach(a => {
         const row = document.createElement('tr');
         row.className = 'is-anomaly';
@@ -210,15 +226,15 @@ function renderChart(dates, values, anomalies, activeMine) {
     const chartType = UI.chartType.value;
     const isStacked = chartType.startsWith('stacked-');
     const trendDegree = parseInt(UI.trendDegree.value);
-    
+
     let datasets = [];
 
     if (isStacked) {
         datasets = mines.map((mine, idx) => ({
             label: mine,
             data: miningData.map(d => d[mine] || 0),
-            backgroundColor: `hsla(${idx * (360/mines.length)}, 70%, 50%, 0.6)`,
-            borderColor: `hsla(${idx * (360/mines.length)}, 70%, 50%, 1)`,
+            backgroundColor: `hsla(${idx * (360 / mines.length)}, 70%, 50%, 0.6)`,
+            borderColor: `hsla(${idx * (360 / mines.length)}, 70%, 50%, 1)`,
             fill: chartType === 'stacked-area',
             stack: 'combined'
         }));
@@ -255,15 +271,15 @@ function renderChart(dates, values, anomalies, activeMine) {
             responsive: true,
             maintainAspectRatio: false,
             scales: {
-                y: { 
+                y: {
                     stacked: isStacked,
-                    grid: { color: '#1e293b' }, 
-                    ticks: { color: '#94a3b8' } 
+                    grid: { color: '#1e293b' },
+                    ticks: { color: '#94a3b8' }
                 },
-                x: { 
+                x: {
                     stacked: isStacked,
-                    grid: { display: false }, 
-                    ticks: { color: '#94a3b8' } 
+                    grid: { display: false },
+                    ticks: { color: '#94a3b8' }
                 }
             },
             plugins: {
@@ -277,73 +293,73 @@ async function generatePDF() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF('p', 'pt', 'a4');
     const chartArea = document.getElementById('chart-capture-area');
-    
+
     UI.pdfBtn.textContent = "WAIT...";
     UI.pdfBtn.disabled = true;
 
     try {
         const canvas = await html2canvas(chartArea, { backgroundColor: '#10141d' });
         const imgData = canvas.toDataURL('image/png');
-        
+
         // Header
-        doc.setFillColor(15, 23, 42); 
+        doc.setFillColor(15, 23, 42);
         doc.rect(0, 0, 600, 100, 'F');
-        doc.setTextColor(248, 250, 252); 
+        doc.setTextColor(248, 250, 252);
         doc.setFont("helvetica", "bold");
         doc.setFontSize(24);
         doc.text("REPORT", 40, 50);
         doc.setFontSize(14);
-        doc.setTextColor(129, 140, 248); 
+        doc.setTextColor(129, 140, 248);
         doc.text("ANALYTICS", 40, 75);
-        
+
         // Info
         doc.setFont("helvetica", "normal");
         doc.setFontSize(10);
-        doc.setTextColor(148, 163, 184); 
+        doc.setTextColor(148, 163, 184);
         doc.text(`Date: ${new Date().toLocaleDateString()}`, 40, 120);
         doc.text(`Source: ${UI.mineSelect.value}`, 40, 135);
-        
+
         // Summary Stats
-        doc.setDrawColor(51, 65, 85); 
+        doc.setDrawColor(51, 65, 85);
         doc.line(40, 150, 550, 150);
-        
+
         doc.setFontSize(12);
         doc.setTextColor(248, 250, 252);
         doc.text("SUMMARY", 40, 175);
-        
+
         const stats = [
             ["Mean", UI.stats.mean.textContent],
             ["Std Dev", UI.stats.std.textContent],
             ["Median", UI.stats.median.textContent],
             ["IQR", UI.stats.iqr.textContent]
         ];
-        
+
         doc.autoTable({
             startY: 190,
             head: [['Metric', 'Value']],
             body: stats,
             theme: 'striped',
-            headStyles: { fillColor: [99, 102, 241], textColor: 255 }, 
+            headStyles: { fillColor: [99, 102, 241], textColor: 255 },
             styles: { fontSize: 10, cellPadding: 5 }
         });
-        
+
         // Chart
         doc.text("CHART", 40, doc.lastAutoTable.finalY + 30);
         doc.addImage(imgData, 'PNG', 40, doc.lastAutoTable.finalY + 40, 515, 250);
-        
+
         doc.addPage();
-        
+
         // Anomalies
         doc.setFontSize(16);
-        doc.setTextColor(239, 68, 68); 
+        doc.setTextColor(239, 68, 68);
         doc.text("ANOMALIES", 40, 50);
-        
+
         const anomalyRows = [];
         UI.anomalyLog.querySelectorAll('tr').forEach(tr => {
             const cells = Array.from(tr.querySelectorAll('td')).map(td => td.textContent);
             anomalyRows.push(cells);
         });
-        
+
         doc.autoTable({
             startY: 70,
             head: [['Date', 'Value', 'Z', 'IQR', 'MA', 'G']],
